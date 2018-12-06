@@ -1,13 +1,114 @@
+#[macro_use] extern crate lazy_static;
 extern crate regex;
 
 use regex::Regex;
+use std::cmp::Ordering;
+use std::cmp::Ord;
+use std::fmt;
+use std::collections::HashMap;
 
 fn main() {
     println!("Hello, Day 4!");
 
-    let input = "[1518-05-30 00:27] wakes up";
-    // let input = "1aoeu";
-    let re = Regex::new(r#"(?x)\[(\d{4}) # year
+
+    let mut events = parse_input(INPUT);
+    events.sort();
+
+    // for event in events {
+    //     println!("{}", event);
+    // }
+
+    let shifts = calculate_guard_shifts(events);
+
+    let sleepiest_guard = shifts.iter().map(|(id, &shift)| {
+        GuardAccumulatedShifts{
+            guard_id: *id,
+            shifts: shift,
+            sleep: shift.iter().sum(),
+        }
+    }).max().expect("failed to find max");
+
+    for (guard_id,shift) in shifts {
+        let sum: u64 = shift.iter().sum();
+        println!("guard_id: {} slept: {} shift: {:?}", guard_id, sum, &shift[..]);
+    }
+
+    let max = sleepiest_guard.shifts.iter().enumerate().fold((0 as usize,0), |max, (i,minute)| if minute > &max.1 {(i,*minute)} else {max});
+
+    println!("{}", sleepiest_guard.guard_id);
+    println!("{:?}", max);
+    println!("{:?}", &sleepiest_guard.shifts[..]);
+}
+
+pub struct GuardAccumulatedShifts {
+    pub guard_id: GuardId,
+    pub shifts: GuardSleepCycle,
+    pub sleep: u64,
+}
+
+impl Ord for GuardAccumulatedShifts {
+    fn cmp(&self, other: &GuardAccumulatedShifts) -> Ordering {
+        self.sleep.cmp(&other.sleep)
+    }
+}
+
+impl PartialOrd for GuardAccumulatedShifts {
+    fn partial_cmp(&self, other: &GuardAccumulatedShifts) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for GuardAccumulatedShifts {
+    fn eq(&self, other: &GuardAccumulatedShifts) -> bool {
+        self.sleep == other.sleep
+    }
+}
+
+impl Eq for GuardAccumulatedShifts{}
+
+pub fn calculate_guard_shifts(events: Vec<Event>) -> HashMap<GuardId, GuardSleepCycle> {
+    let mut cycles = HashMap::new();
+    let mut current_guard: Option<GuardId> = None;
+    let mut start_sleep_timestamp = events[0].timestamp.clone();
+    for event in events {
+        match event.action {
+            Action::BeginShift(guard_id) => {
+                current_guard = Some(guard_id);
+            }
+            Action::FallsAsleep => {
+                start_sleep_timestamp = event.timestamp;
+            }
+            Action::WakesUp => {
+                let wake_up_timestamp = event.timestamp;
+                let mut acc_cycles = cycles.entry(current_guard.expect("failed no current guard")).or_insert([0; 60]);
+                add_guard_shift(&mut acc_cycles, &start_sleep_timestamp, &wake_up_timestamp);
+            }
+        }
+    }
+    cycles
+}
+
+pub fn add_guard_shift(accumulated_cycle: &mut GuardSleepCycle, start: &Timestamp, end: &Timestamp) {
+    let start_index = if start.hour == 23 {
+        0//((start.minute as i64 - 60 as i64) + 60) as usize
+    } else {
+        start.minute// + 60
+    };
+    let end_index = if end.hour == 23 {
+        0
+    }else {
+        end.minute// + 60;
+    };
+    //println!("shift {} start: {},  end: {}", start, start_index, end.minute);
+
+    for i in start.minute..end.minute {
+        accumulated_cycle[i] += 1;
+    }
+}
+
+pub fn parse_input(input: &str) -> Vec<Event> {
+    lazy_static! {
+        static ref re_input: Regex = Regex::new(r#"(?x)\[(\d{4}) # year
 \-
 (\d{2}) # month
 \-
@@ -19,34 +120,118 @@ fn main() {
 (.+) # rest of string
 "#).expect("failed to create regex");
 
-    //println!("is match : {}", re.is_match(input));
-
-    for cap in re.captures_iter(INPUT) {
-        println!("{:?}", cap);
+        static ref re_guard: Regex = Regex::new(r#"Guard\p{White_Space}\#(\d+)\p{White_Space}begins\p{White_Space}shift"#).expect("failed to create regex");
     }
+
+    re_input.captures_iter(INPUT).map(|cap| {
+        let year = &cap[1];
+        let month = &cap[2];
+        let day = &cap[3];
+        let hour = &cap[4];
+        let minute = &cap[5];
+        let timestamp = Timestamp {
+            year: year.parse().expect("failed to parse year"),
+            month: month.parse().expect("failed to parse month"),
+            day: day.parse().expect("failed to parse day"),
+            hour: hour.parse().expect("failed to parse hour"),
+            minute: minute.parse().expect("failed to parse minute"),
+        };
+
+        let action = &cap[6];
+        match action {
+            "falls asleep" =>
+                Event {
+                    timestamp: timestamp,
+                    action: Action::FallsAsleep,
+                },
+            "wakes up" =>
+                Event {
+                    timestamp: timestamp,
+                    action: Action::WakesUp,
+                },
+            _ => {
+                let guard_cap = re_guard.captures(action).expect("failed to capture guard");
+                Event {
+                    timestamp: timestamp,
+                    action: Action::BeginShift(guard_cap[1].parse::<u64>().expect("failed to parse guard id")),
+                }
+            }
+        }
+    }).collect()
 }
 
+#[derive(Clone, Debug)]
 pub struct Event {
-    pub time: Time,
+    pub timestamp: Timestamp,
     pub action: Action,
 }
 
-impl Event {
-    pub fn parse(input: &str) -> Result<Event, String> {
-        Err("tbd".to_owned())
+impl fmt::Display for Event {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {:?}", self.timestamp, self.action)
     }
 }
 
-pub struct Time {
-    pub hour: u64,
-    pub minute: u64,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Timestamp {
+    pub year: usize,
+    pub month: usize,
+    pub day: usize,
+    pub hour: usize,
+    pub minute: usize,
 }
 
+impl fmt::Display for Timestamp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[{}-{}-{} {}:{}]", self.year, self.month, self.day, self.hour, self.minute)
+    }
+}
+
+impl Timestamp {
+    pub fn day(&self) -> String {
+        format!("{}-{}-{}", self.year, self.month, self.day)
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum Action {
-    BeginShift(u64),
+    BeginShift(GuardId),
     FallsAsleep,
     WakesUp,
 }
+
+type GuardId = u64;
+type GuardSleepCycle = [u64; 60];
+
+impl Ord for Event {
+    fn cmp(&self, other: &Event) -> Ordering {
+        let year_ordering = self.timestamp.year.cmp(&other.timestamp.year);
+        let month_ordering = self.timestamp.month.cmp(&other.timestamp.month);
+        let day_ordering = self.timestamp.day.cmp(&other.timestamp.day);
+        // hour is inverted since the only hours are 23 and 00
+        let hour_ordering = other.timestamp.hour.cmp(&self.timestamp.hour);
+        let minute_ordering = self.timestamp.minute.cmp(&other.timestamp.minute);
+
+        let orderings = [year_ordering, month_ordering, day_ordering, hour_ordering, minute_ordering];
+        *orderings.iter()
+            .find(|ordering| **ordering != Ordering::Equal)
+            .unwrap_or(&Ordering::Equal)
+    }
+}
+
+impl PartialOrd for Event {
+    fn partial_cmp(&self, other: &Event) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Event {
+    fn eq(&self, other: &Event) -> bool {
+        self.timestamp == other.timestamp
+    }
+}
+
+impl Eq for Event {}
 
 static INPUT: &str = "[1518-05-30 00:27] wakes up
 [1518-11-02 00:00] Guard #433 begins shift
