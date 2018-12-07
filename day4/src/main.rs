@@ -1,7 +1,9 @@
 #[macro_use] extern crate lazy_static;
 extern crate regex;
+extern crate chrono;
 
 use regex::Regex;
+use chrono::{NaiveDateTime, NaiveDate};
 use std::cmp::Ordering;
 use std::cmp::Ord;
 use std::fmt;
@@ -10,34 +12,25 @@ use std::collections::HashMap;
 fn main() {
     println!("Hello, Day 4!");
 
-
     let mut events = parse_input(INPUT);
     events.sort();
 
-    // for event in events {
+    // for event in &events {
     //     println!("{}", event);
     // }
 
-    let shifts = calculate_guard_shifts(events);
+    let acc_shifts = calculate_guard_shifts(events);
 
-    let sleepiest_guard = shifts.iter().map(|(id, &shift)| {
-        GuardAccumulatedShifts{
-            guard_id: *id,
-            shifts: shift,
-            sleep: shift.iter().sum(),
-        }
-    }).max().expect("failed to find max");
+    let sleepiest_guard = find_sleepiest_guard(&acc_shifts);
+    let sleepiest_minute_guard = sleepiest_guard.sleepiest_minute();
+    let product = sleepiest_minute_guard.0 as u64 * sleepiest_guard.guard_id;
 
-    for (guard_id,shift) in shifts {
-        let sum: u64 = shift.iter().sum();
-        println!("guard_id: {} slept: {} shift: {:?}", guard_id, sum, &shift[..]);
-    }
+    println!("sleepiest guard: {}, sleepiest minute: {:?}, product: {}", sleepiest_guard.guard_id, sleepiest_minute_guard, product);
 
-    let max = sleepiest_guard.shifts.iter().enumerate().fold((0 as usize,0), |max, (i,minute)| if minute > &max.1 {(i,*minute)} else {max});
-
-    println!("{}", sleepiest_guard.guard_id);
-    println!("{:?}", max);
-    println!("{:?}", &sleepiest_guard.shifts[..]);
+    let guard_slept_most = find_guard_slept_most_times(&acc_shifts);
+    let guard_slept_most_sleepiest_minute = guard_slept_most.sleepiest_minute();
+    let product_2 = guard_slept_most_sleepiest_minute.0 as u64 * guard_slept_most.guard_id;
+    println!("guard slept most: {}, sleepiest minute: {:?}, product: {}", guard_slept_most.guard_id,guard_slept_most_sleepiest_minute, product_2);
 }
 
 pub struct GuardAccumulatedShifts {
@@ -46,27 +39,33 @@ pub struct GuardAccumulatedShifts {
     pub sleep: u64,
 }
 
-impl Ord for GuardAccumulatedShifts {
-    fn cmp(&self, other: &GuardAccumulatedShifts) -> Ordering {
-        self.sleep.cmp(&other.sleep)
+impl GuardAccumulatedShifts {
+    pub fn sleepiest_minute(&self) -> (usize, u64) {
+        self.shifts.iter().enumerate().fold((0 as usize,0), |max, (i,minute)| if minute > &max.1 {(i,*minute)} else {max})
     }
 }
 
-impl PartialOrd for GuardAccumulatedShifts {
-    fn partial_cmp(&self, other: &GuardAccumulatedShifts) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
+pub fn find_sleepiest_guard(acc_shifts: &Vec<GuardAccumulatedShifts>) -> &GuardAccumulatedShifts {
+    acc_shifts.into_iter().max_by(|x, y| x.sleep.cmp(&y.sleep)).expect("failed to find sleepiest guard")
 }
 
-impl PartialEq for GuardAccumulatedShifts {
-    fn eq(&self, other: &GuardAccumulatedShifts) -> bool {
-        self.sleep == other.sleep
-    }
+pub fn find_guard_slept_most_times(acc_shifts: &Vec<GuardAccumulatedShifts>) -> &GuardAccumulatedShifts {
+    acc_shifts.into_iter().max_by(|x,y| {
+        x.sleepiest_minute().1.cmp(&y.sleepiest_minute().1)
+    }).expect("failed to find guard slept most")
 }
 
-impl Eq for GuardAccumulatedShifts{}
+fn accumulate_shifts(shifts: &HashMap<GuardId, GuardSleepCycle>) -> Vec<GuardAccumulatedShifts> {
+    shifts.iter().map(|(id, &shift)| {
+        GuardAccumulatedShifts{
+            guard_id: *id,
+            shifts: shift,
+            sleep: shift.iter().sum(),
+        }
+    }).collect()
+}
 
-pub fn calculate_guard_shifts(events: Vec<Event>) -> HashMap<GuardId, GuardSleepCycle> {
+pub fn calculate_guard_shifts(events: Vec<Event>) -> Vec<GuardAccumulatedShifts> {
     let mut cycles = HashMap::new();
     let mut current_guard: Option<GuardId> = None;
     let mut start_sleep_timestamp = events[0].timestamp.clone();
@@ -85,24 +84,12 @@ pub fn calculate_guard_shifts(events: Vec<Event>) -> HashMap<GuardId, GuardSleep
             }
         }
     }
-    cycles
+    accumulate_shifts(&cycles)
 }
 
-pub fn add_guard_shift(accumulated_cycle: &mut GuardSleepCycle, start: &Timestamp, end: &Timestamp) {
-    let start_index = if start.hour == 23 {
-        0//((start.minute as i64 - 60 as i64) + 60) as usize
-    } else {
-        start.minute// + 60
-    };
-    let end_index = if end.hour == 23 {
-        0
-    }else {
-        end.minute// + 60;
-    };
-    //println!("shift {} start: {},  end: {}", start, start_index, end.minute);
-
+fn add_guard_shift(accumulated_cycle: &mut GuardSleepCycle, start: &Timestamp, end: &Timestamp) {
     for i in start.minute..end.minute {
-        accumulated_cycle[i] += 1;
+        accumulated_cycle[i as usize] += 1;
     }
 }
 
@@ -168,28 +155,32 @@ pub struct Event {
 
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {:?}", self.timestamp, self.action)
+        write!(f, "{} {}", self.timestamp, self.action)
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Timestamp {
-    pub year: usize,
-    pub month: usize,
-    pub day: usize,
-    pub hour: usize,
-    pub minute: usize,
+    pub year: i32,
+    pub month: u32,
+    pub day: u32,
+    pub hour: u32,
+    pub minute: u32,
 }
 
 impl fmt::Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[{}-{}-{} {}:{}]", self.year, self.month, self.day, self.hour, self.minute)
+        write!(f, "[{}-{:0>2}-{:0>2} {:0>2}:{:0>2}]", self.year, self.month, self.day, self.hour, self.minute)
     }
 }
 
 impl Timestamp {
     pub fn day(&self) -> String {
         format!("{}-{}-{}", self.year, self.month, self.day)
+    }
+
+    pub fn datetime(&self) -> NaiveDateTime {
+        NaiveDate::from_ymd(self.year, self.month, self.day).and_hms(self.hour, self.minute , 0)
     }
 }
 
@@ -200,22 +191,28 @@ pub enum Action {
     WakesUp,
 }
 
+impl fmt::Display for Action {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Action::BeginShift(guard_id) => {
+                write!(f, "Guard #{} begins shift", guard_id)
+            }
+            Action::WakesUp => {
+                write!(f, "wakes up")
+            }
+            Action::FallsAsleep => {
+                write!(f, "falls asleep")
+            }
+        }
+    }
+}
+
 type GuardId = u64;
 type GuardSleepCycle = [u64; 60];
 
 impl Ord for Event {
     fn cmp(&self, other: &Event) -> Ordering {
-        let year_ordering = self.timestamp.year.cmp(&other.timestamp.year);
-        let month_ordering = self.timestamp.month.cmp(&other.timestamp.month);
-        let day_ordering = self.timestamp.day.cmp(&other.timestamp.day);
-        // hour is inverted since the only hours are 23 and 00
-        let hour_ordering = other.timestamp.hour.cmp(&self.timestamp.hour);
-        let minute_ordering = self.timestamp.minute.cmp(&other.timestamp.minute);
-
-        let orderings = [year_ordering, month_ordering, day_ordering, hour_ordering, minute_ordering];
-        *orderings.iter()
-            .find(|ordering| **ordering != Ordering::Equal)
-            .unwrap_or(&Ordering::Equal)
+        self.timestamp.datetime().timestamp().cmp(&other.timestamp.datetime().timestamp())
     }
 }
 
