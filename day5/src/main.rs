@@ -14,8 +14,28 @@ fn main() {
     let mut particles = Particles::new(&input);
     particles.react_completely();
 
-    println!("particles: {}", particles);
+    //println!("particles: {}", particles);
     println!("len particles: {}", particles.particles.len());
+
+    let most_reactive_polymer = find_most_reactive_polymer(&input);
+    println!("len most reactive polymer: {}", most_reactive_polymer.len());
+}
+
+pub fn find_most_reactive_polymer(input: &str) -> Particles {
+    let mut most_reactive = Particles::new(&input);
+
+    for ascii_code in 65 ..= 90 {
+        let ch = char::from(ascii_code);
+        println!("trying {}", ch);
+        let mut new_particles = Particles::new(&input);
+        new_particles.extract(ch);
+        new_particles.react_completely();
+        if new_particles.len() < most_reactive.len() {
+            most_reactive = new_particles;
+        }
+    }
+
+    most_reactive
 }
 
 pub struct Particles {
@@ -44,8 +64,12 @@ impl fmt::Display for Particle {
 impl Particles {
     pub fn new(input: &str) -> Particles {
         Particles{
-            particles: input.chars().map(|c| Particle::UnReacted(c)).collect(),
+            particles: input.chars().filter(|c| !c.is_whitespace()).map(|c| Particle::UnReacted(c)).collect(),
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.particles.len()
     }
 
     pub fn react_once(&mut self) {
@@ -82,6 +106,16 @@ impl Particles {
             self.react_once();
         }
         self.react_once();
+    }
+
+    pub fn extract(&mut self, ch: char) {
+        self.particles = self.particles.clone().into_iter().filter(|x| {
+            if let Particle::UnReacted(unreacted_ch) = x {
+                !unreacted_ch.eq_ignore_ascii_case(&ch)
+            } else {
+                true
+            }
+        }).collect()
     }
 }
 
