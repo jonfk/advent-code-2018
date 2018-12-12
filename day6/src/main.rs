@@ -27,7 +27,8 @@ fn main() {
 #[derive(Clone)]
 pub struct Map {
     pub size: usize,
-    cells: Vec<Vec<CellType>>
+    cells: Vec<Vec<CellType>>,
+    centers: Vec<Coordinate>,
 }
 
 impl Map {
@@ -50,6 +51,7 @@ impl Map {
         Map{
             size: size,
             cells: cells,
+            centers: coordinates.coords.clone(),
         }
     }
 
@@ -69,6 +71,7 @@ impl Map {
         for x in 0..self.size {
             for y in 0..self.size {
                 let coord = Coordinate::new(x, y);
+                println!("populating {:?}", coord);
                 let new_cell = self.closest_center(coord);
                 self.cells[x][y] = new_cell;
             }
@@ -76,64 +79,32 @@ impl Map {
     }
 
     pub fn closest_center(&self, coordinate: Coordinate) -> CellType {
+        println!("closest_center {:?}", coordinate);
         if let CellType::Center(id) = self.cells[coordinate.x][coordinate.y] {
             return CellType::Center(id);
         }
 
-        let mut centers = Vec::new();
-        for i in 0..self.size {
-            self.closest_cells(i, coordinate).iter().for_each(|coord| {
-                if let CellType::Center(id) = self.cells[coord.x][coord.y] {
-                    centers.push(id);
+        let mut closest_center = None;
+        let mut closest_distance = None;
+        for (id, center) in self.centers.iter().enumerate() {
+            if let Some(closest_dist) = closest_distance {
+                let dist = coordinate.distance(&center);
+                if closest_dist == dist {
+                    println!("equal {:?} and {:?}", closest_center, id);
+                    return CellType::Equal;
+                } else if dist < closest_dist {
+                    closest_distance = Some(dist);
+                    closest_center = Some(id);
                 }
-            });
-            if centers.len() > 0 {
-                break;
-            }
-        }
-        if centers.len() == 1 {
-            CellType::Closest(centers[0])
-        } else {
-            CellType::Equal
-        }
-    }
-
-    // assumes x, y are valid coordinates
-    fn closest_cells(&self, idx: usize, coordinate: Coordinate) -> Vec<Coordinate> {
-        let x = coordinate.x;
-        let y = coordinate.y;
-
-        let mut cells = Vec::new();
-        let x_sub_idx = x.checked_sub(idx);
-        let y_sub_idx = y.checked_sub(idx);
-        let x_add_idx = x + idx;
-        let y_add_idx = y + idx;
-        if let Some(new_x) = x_sub_idx {
-            cells.push(Coordinate::new(new_x, y));
-            if y_add_idx < self.size {
-                cells.push(Coordinate::new(new_x, y_add_idx));
+            } else {
+                closest_center = Some(id);
+                closest_distance = Some(coordinate.distance(&center));
             }
         }
 
-        if let Some(new_y) = y_sub_idx {
-            cells.push(Coordinate::new(x, new_y));
-            if x_add_idx < self.size {
-                cells.push(Coordinate::new(x_add_idx, new_y));
-            }
-        }
-        if y_sub_idx.is_some() && x_sub_idx.is_some() {
-            cells.push(Coordinate::new(x - idx, y - idx));
-        }
-        if x_add_idx < self.size {
-            cells.push(Coordinate::new(x_add_idx, y));
-        }
-        if y_add_idx < self.size {
-            cells.push(Coordinate::new(x, y_add_idx));
-        }
-        if x_add_idx < self.size && y_add_idx < self.size {
-            cells.push(Coordinate::new(x_add_idx, y_add_idx));
-        }
-        cells
+        let closest_id = closest_center.expect("failed to ge closest center");
+        println!("coord: {:?} closest: {}, center: {:?}", coordinate, closest_id, self.centers[closest_id]);
+        CellType::Closest(closest_id as i64)
     }
 
     pub fn is_border_cell(&self, coord: Coordinate) -> bool {
@@ -148,7 +119,6 @@ impl Map {
                 let cell = self.cells[x][y];
                 let coord = Coordinate::new(x, y);
                 if self.is_border_cell(coord) {
-                    println!("is_border_Cell {:?}", cell);
                     if let CellType::Closest(id) = cell {
                         outer_areas.insert(id);
                     } else if let CellType::Center(id) = cell {
@@ -157,12 +127,10 @@ impl Map {
                 } else {
                     match cell {
                         CellType::Center(id) => {
-                            println!("addin a new one {}", id);
                             let area = inner_areas.entry(id).or_insert(0);
                             *area += 1;
                         }
                         CellType::Closest(id) => {
-                            println!("addin a new one {}", id);
                             let area = inner_areas.entry(id).or_insert(0);
                             *area += 1;
                         }
@@ -203,51 +171,6 @@ impl fmt::Display for Map {
         Ok(())
     }
 }
-
-impl<'a> IntoIterator for &'a Map {
-    type Item = Cell;
-    type IntoIter = MapIterator<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        MapIterator{map: self, curr_coord: Coordinate::new(0,0), start: true}
-    }
-}
-
-pub struct MapIterator<'a> {
-    map: &'a Map,
-    curr_coord: Coordinate,
-    start: bool,
-}
-
-impl<'a> Iterator for MapIterator<'a> {
-    type Item = Cell;
-
-    fn next(&mut self) -> Option<Cell> {
-        if self.start {
-            let current = self.map.cells[self.curr_coord.x][self.curr_coord.y];
-            self.start = false;
-            Some(Cell{
-                cell_type: current,
-                coord: self.curr_coord,
-            })
-        } else {
-            if self.curr_coord.y < self.map.size - 1 {
-                self.curr_coord.y += 1;
-            } else if self.curr_coord.x < self.map.size - 1 {
-                self.curr_coord.x += 1;
-            } else {
-                return None;
-            }
-            let cell_type = self.map.cells[self.curr_coord.x][self.curr_coord.y];
-            println!("iterating {:?} cell: {:?}", self.curr_coord, cell_type);
-            Some(Cell{
-                cell_type: cell_type,
-                coord: self.curr_coord,
-            })
-        }
-    }
-}
-
 
 #[derive(Debug, Copy, Clone)]
 pub struct Cell {
@@ -297,5 +220,11 @@ impl Coordinate {
         let x = iter.next().expect("failed to get x").parse().expect("failed to parse x");
         let y = iter.next().expect("failed to get y").trim().parse().expect("failed to parse y");
         Coordinate::new(x, y)
+    }
+
+    pub fn distance(&self, other: &Coordinate) -> usize {
+        let x_diff = self.x as i64 - other.x as i64;
+        let y_diff = self.y as i64 - other.y as i64;
+        (x_diff.abs() + y_diff.abs()) as usize
     }
 }
